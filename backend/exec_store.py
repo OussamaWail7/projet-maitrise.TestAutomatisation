@@ -26,6 +26,8 @@ def create_execution(kind: str, params: dict | None = None, test_case_id: str | 
         "logs_url": f"/executions/{exec_id}/logs",
         "artifacts": [],     # liste de dicts {name,url,size}
         "language": (params or {}).get("language"),
+        "jacoco_metrics": None,  # ✅ Métriques de couverture JaCoCo
+        "quality_analysis": None,  # ✅ Analyse de qualité du test
     }
     return exec_id
 
@@ -38,7 +40,7 @@ def mark_running(exec_id: str, notes: Optional[str] = None) -> None:
     if notes:
         ex["notes"] = notes
 
-def mark_result(exec_id: str, ok: bool, logs: str, artifacts: List[dict] | None = None) -> None:
+def mark_result(exec_id: str, ok: bool, logs: str, artifacts: List[dict] | None = None, jacoco_metrics: dict | None = None, quality_analysis: dict | None = None) -> None:
     ex = _EXEC.get(exec_id)
     if not ex:
         return
@@ -47,6 +49,12 @@ def mark_result(exec_id: str, ok: bool, logs: str, artifacts: List[dict] | None 
     # Toujours poser un string, jamais None
     ex["logs"] = str(logs or "")
     ex["artifacts"] = artifacts or []
+    # ✅ Stocker les métriques JaCoCo si disponibles
+    if jacoco_metrics:
+        ex["jacoco_metrics"] = jacoco_metrics
+    # ✅ Stocker l'analyse de qualité si disponible
+    if quality_analysis:
+        ex["quality_analysis"] = quality_analysis
 
 def get_execution(exec_id: str) -> Optional[Dict[str, Any]]:
     return _EXEC.get(exec_id)

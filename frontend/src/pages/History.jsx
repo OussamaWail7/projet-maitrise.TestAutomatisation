@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
-import { Clock, Search, X, Copy } from "lucide-react";
+import { Clock, Search, X, Copy, Grid3x3, List, RefreshCw } from "lucide-react";
 import { apiJson, getApiBase } from "../lib/api";
+import { Skeleton } from "../components/Skeleton";
+import EmptyState from "../components/EmptyState";
+import CodeViewer from "../components/CodeViewer";
+import TestCard from "../components/TestCard";
 
 export default function History() {
   const [items, setItems] = useState([]);
@@ -25,6 +29,9 @@ export default function History() {
   const [runOpen, setRunOpen] = useState(false);
   const [runBusy, setRunBusy] = useState(false);
   const [runMeta, setRunMeta] = useState(null); // {execId, at, row, error?}
+
+  // Vue : grid ou list
+  const [viewMode, setViewMode] = useState("grid"); // "grid" | "list"
 
   const statusBadge = (s) => {
     const st = (s || "confirmed").toLowerCase();
@@ -169,6 +176,7 @@ export default function History() {
               <option value="">Tous</option>
               <option value="gemini">Gemini</option>
               <option value="ollama">Ollama</option>
+              <option value="mistral">Mistral</option>
             </select>
           </label>
 
@@ -224,13 +232,21 @@ export default function History() {
                 e.preventDefault();
                 fetchList();
               }}
-              className="rounded-xl bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800"
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-60 disabled:cursor-not-allowed"
+              disabled={loading}
             >
-              Appliquer les filtres
+              {loading ? (
+                <>
+                  <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  Chargement...
+                </>
+              ) : (
+                "Appliquer les filtres"
+              )}
             </button>
             <button
               type="button"
-              onClick={(e) => {
+              onClick={async (e) => {
                 e.preventDefault();
                 setContains("");
                 setTestType("");
@@ -240,10 +256,26 @@ export default function History() {
                 setDateFrom("");
                 setDateTo("");
                 setLimit(50);
+                // Rafraîchir la liste après réinitialisation
+                await fetchList();
               }}
-              className="rounded-xl border border-black/10 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+              className="rounded-xl border border-black/10 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
+              disabled={loading}
             >
               Réinitialiser
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                fetchList();
+              }}
+              className="inline-flex items-center gap-2 rounded-xl border border-black/10 px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
+              disabled={loading}
+              title="Rafraîchir la liste"
+            >
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+              Rafraîchir
             </button>
           </div>
         </div>
@@ -251,99 +283,70 @@ export default function History() {
 
       {/* Liste */}
       <div className="rounded-2xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-gray-900">
+        {/* View Toggle */}
+        {!loading && items.length > 0 && (
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              {items.length} test{items.length > 1 ? "s" : ""} trouvé{items.length > 1 ? "s" : ""}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setViewMode("grid")}
+                className={`rounded-lg p-2 transition ${
+                  viewMode === "grid"
+                    ? "bg-indigo-700 text-white"
+                    : "border border-black/10 hover:bg-gray-50 dark:hover:bg-gray-800"
+                }`}
+                title="Vue grille"
+              >
+                <Grid3x3 size={16} />
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={`rounded-lg p-2 transition ${
+                  viewMode === "list"
+                    ? "bg-indigo-700 text-white"
+                    : "border border-black/10 hover:bg-gray-50 dark:hover:bg-gray-800"
+                }`}
+                title="Vue liste"
+              >
+                <List size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+
         {loading ? (
-          <p className="text-sm opacity-70">Chargement…</p>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <Skeleton key={i} variant="card" />
+            ))}
+          </div>
         ) : items.length === 0 ? (
-          <p className="text-sm opacity-70">Aucun résultat.</p>
+          <EmptyState
+            icon="search"
+            title="Aucun cas de test trouvé"
+            description="Générez votre premier cas de test depuis la page Générateur pour commencer."
+            action={
+              <a
+                href="/generator"
+                className="rounded-xl bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800"
+              >
+                Générer un test
+              </a>
+            }
+          />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] table-fixed text-sm">
-              <colgroup>
-                <col className="w-[190px]" /> {/* Date */}
-                <col className="w-[140px]" /> {/* Type */}
-                <col className="w-[130px]" /> {/* Langage */}
-                <col className="w-[140px]" /> {/* Provider */}
-                <col className="w-[120px]" /> {/* Statut */}
-                <col className="w-[320px]" /> {/* Code & test (bouton) */}
-                <col className="w-[150px]" /> {/* Action */}
-              </colgroup>
-              <thead className="text-left">
-                <tr className="border-b border-black/10 dark:border-white/10">
-                  <th className="py-2 pr-4">Date</th>
-                  <th className="py-2 pr-4">Type</th>
-                  <th className="py-2 pr-4">Langage</th>
-                  <th className="py-2 pr-4">Provider</th>
-                  <th className="py-2 pr-4">Statut</th>
-                  <th className="py-2 pr-4">Code & test</th>
-                  <th className="py-2 pr-4">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((it) => (
-                  <tr key={it._id} className="border-b border-black/5 dark:border-white/5 align-top">
-                    <td className="py-2 pr-4 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1">
-                        <Clock size={14} />
-                        {new Date(it.created_at || Date.now()).toLocaleString()}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-4">{it.test_type}</td>
-                    <td className="py-2 pr-4">{it.language || "java"}</td>
-                    <td className="py-2 pr-4">{it.provider || "-"}</td>
-                    <td className="py-2 pr-4">{statusBadge(it.status)}</td>
-
-                    {/* Colonne fusionnée: ouvre la modale Code + Extrait */}
-                    <td className="py-2 pr-4">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            openDetails(it);
-                          }}
-                          className="rounded-lg border border-black/10 px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-                          title="Voir le code et l'extrait"
-                        >
-                          Voir détails
-                        </button>
-                        <span className="ml-2 hidden lg:inline text-xs text-gray-500 dark:text-gray-400">
-                          aperçu&nbsp;:&nbsp;
-                          <code className="rounded bg-black/5 px-2 py-0.5">
-                            {(it.generated_test || "").slice(0, 32) || "—"}…
-                          </code>
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* Action */}
-                    <td className="py-2 pr-4">
-                      <button
-                        type="button"
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          await runExecution(it);
-                        }}
-                        disabled={runBusy}
-                        className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-white ${
-                          runBusy ? "bg-indigo-400 cursor-not-allowed" : "bg-indigo-700 hover:bg-indigo-800"
-                        }`}
-                      >
-                        {runBusy ? (
-                          <span className="inline-flex items-center gap-2">
-                            <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-r-transparent" />
-                            Exécution…
-                          </span>
-                        ) : (
-                          "Exécuter"
-                        )}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className={viewMode === "grid" ? "grid gap-4 md:grid-cols-2 lg:grid-cols-3" : "space-y-3"}>
+            {items.map((it) => (
+              <TestCard
+                key={it._id}
+                test={it}
+                onViewDetails={openDetails}
+                onExecute={runExecution}
+                isExecuting={runBusy}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -404,21 +407,27 @@ export default function History() {
 
             <div className="mt-4 grid gap-4" style={{ gridTemplateColumns: view === "both" ? "1fr 1fr" : "1fr" }}>
               {(view === "both" || view === "code") && (
-                <section className="rounded-xl border border-black/10 p-3 dark:border-white/10">
+                <section>
                   <h3 className="mb-2 text-sm font-medium">Code</h3>
-                  <div className="max-h-[55vh] overflow-auto rounded-lg bg-black/5 p-3 dark:bg-white/5">
-                    <pre className="text-xs leading-relaxed whitespace-pre-wrap">{selected.code || "(vide)"}</pre>
-                  </div>
+                  <CodeViewer
+                    code={selected.code || "(vide)"}
+                    language={selected.language || "java"}
+                    showLineNumbers={true}
+                    maxHeight="55vh"
+                    fileName={`SourceCode.${selected.language === 'java' ? 'java' : selected.language === 'python' ? 'py' : 'txt'}`}
+                  />
                 </section>
               )}
               {(view === "both" || view === "excerpt") && (
-                <section className="rounded-xl border border-black/10 p-3 dark:border-white/10">
+                <section>
                   <h3 className="mb-2 text-sm font-medium">Extrait (test généré)</h3>
-                  <div className="max-h-[55vh] overflow-auto rounded-lg bg-black/5 p-3 dark:bg-white/5">
-                    <pre className="text-xs leading-relaxed whitespace-pre-wrap">
-                      {selected.generated_test || "(vide)"}
-                    </pre>
-                  </div>
+                  <CodeViewer
+                    code={selected.generated_test || "(vide)"}
+                    language={selected.language || "java"}
+                    showLineNumbers={true}
+                    maxHeight="55vh"
+                    fileName={`Test.${selected.language === 'java' ? 'java' : selected.language === 'python' ? 'py' : 'txt'}`}
+                  />
                 </section>
               )}
             </div>
@@ -463,11 +472,12 @@ export default function History() {
 
                 <div className="mt-3">
                   <p className="mb-1 text-xs font-medium text-gray-700 dark:text-gray-300">Aperçu code</p>
-                  <div className="max-h-[24vh] overflow-auto rounded-lg bg-black/5 p-3 dark:bg-white/5">
-                    <pre className="text-xs leading-relaxed whitespace-pre-wrap">
-                      {(runMeta.row?.code || "").slice(0, 1200) || "(vide)"}
-                    </pre>
-                  </div>
+                  <CodeViewer
+                    code={(runMeta.row?.code || "").slice(0, 1200) || "(vide)"}
+                    language={runMeta.row?.language || "java"}
+                    showLineNumbers={false}
+                    maxHeight="24vh"
+                  />
                 </div>
               </section>
 
@@ -516,11 +526,12 @@ export default function History() {
 
                 <div className="mt-4">
                   <p className="mb-1 text-xs font-medium text-gray-700 dark:text-gray-300">Aperçu du test généré</p>
-                  <div className="max-h-[24vh] overflow-auto rounded-lg bg-black/5 p-3 dark:bg-white/5">
-                    <pre className="text-xs leading-relaxed whitespace-pre-wrap">
-                      {(runMeta.row?.generated_test || "").slice(0, 1200) || "(vide)"}
-                    </pre>
-                  </div>
+                  <CodeViewer
+                    code={(runMeta.row?.generated_test || "").slice(0, 1200) || "(vide)"}
+                    language={runMeta.row?.language || "java"}
+                    showLineNumbers={false}
+                    maxHeight="24vh"
+                  />
                 </div>
               </section>
             </div>

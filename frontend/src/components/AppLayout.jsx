@@ -1,4 +1,4 @@
-import { Sparkles, Settings, History, TestTubes } from "lucide-react";
+import { Sparkles, Settings, History, TestTubes, LayoutDashboard } from "lucide-react";
 import { Outlet } from "react-router-dom";
 import SidebarLink from "./SidebarLink";
 import ThemeToggle from "./ThemeToggle";
@@ -16,7 +16,8 @@ export default function AppLayout() {
             <span className="text-lg font-semibold tracking-tight">TestIQ</span>
           </div>
           <nav className="px-3 py-3 space-y-2">
-            <SidebarLink to="/" icon={<TestTubes size={16}/>}>Générateur</SidebarLink>
+            <SidebarLink to="/" icon={<LayoutDashboard size={16}/>}>Dashboard</SidebarLink>
+            <SidebarLink to="/generator" icon={<Sparkles size={16}/>}>Générateur</SidebarLink>
             <SidebarLink to="/executions" icon={<FlaskRound size={16}/>}>Exécutions</SidebarLink>
             <SidebarLink to="/history" icon={<History size={16}/>}>Historique</SidebarLink>
             <SidebarLink to="/settings" icon={<Settings size={16}/>}>Paramètres</SidebarLink>

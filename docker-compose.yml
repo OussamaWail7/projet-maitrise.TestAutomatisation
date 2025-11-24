@@ -1,10 +1,150 @@
+version: '3.8'
+
 services:
-  selenium:
-    image: selenium/standalone-chrome:latest
-    container_name: selenium
-    shm_size: 2gb
+  # MongoDB
+  mongodb:
+    image: mongo:7.0
+    container_name: projetia-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
     environment:
-      - SE_NODE_MAX_SESSIONS=1
-      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
+      MONGO_INITDB_DATABASE: llm_tests
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - projetia-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend FastAPI
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: projetia-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # MongoDB
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB: llm_tests
+
+      # LLM Provider (choisir un: gemini, ollama, mistral)
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+
+      # Ollama (si provider=ollama)
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434/api/generate}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-coder:6.7b}
+
+      # Gemini (si provider=gemini)
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GOOGLE_MODEL: ${GOOGLE_MODEL:-gemini-1.5-flash}
+
+      # Mistral (si provider=mistral)
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_MODEL: ${MISTRAL_MODEL:-mistral-small-latest}
+
+      # S�curit�
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      JWT_SECRET: ${JWT_SECRET:-}
+      CORS_ALLOWED_ORIGINS: http://localhost,http://localhost:80,http://localhost:5173
+
+      # Performance
+      GEN_TIMEOUT: ${GEN_TIMEOUT:-180}
+      MAX_GENERATE_PER_MIN: ${MAX_GENERATE_PER_MIN:-60}
+
+      # Selenium Grid
+      SELENIUM_REMOTE_URL: http://selenium-hub:4444/wd/hub
+    volumes:
+      # Volume pour Docker-in-Docker (ex�cution tests Java)
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - projetia-network
+    extra_hosts:
+      # Permet d'acc�der � l'h�te pour Ollama local
+      - "host.docker.internal:host-gateway"
+
+  # Frontend React
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: projetia-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      VITE_API_BASE: http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - projetia-network
+
+  # Selenium Grid Hub
+  selenium-hub:
+    image: selenium/hub:4.15.0
+    container_name: projetia-selenium-hub
+    restart: unless-stopped
     ports:
       - "4444:4444"
+      - "4442:4442"
+      - "4443:4443"
+    networks:
+      - projetia-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Selenium Chrome Node
+  selenium-chrome:
+    image: selenium/node-chrome:4.15.0
+    container_name: projetia-selenium-chrome
+    restart: unless-stopped
+    shm_size: 2gb
+    environment:
+      SE_EVENT_BUS_HOST: selenium-hub
+      SE_EVENT_BUS_PUBLISH_PORT: 4442
+      SE_EVENT_BUS_SUBSCRIBE_PORT: 4443
+      SE_NODE_MAX_SESSIONS: 2
+      SE_NODE_SESSION_TIMEOUT: 300
+    depends_on:
+      selenium-hub:
+        condition: service_healthy
+    networks:
+      - projetia-network
+
+  # Selenium Firefox Node (optionnel)
+  selenium-firefox:
+    image: selenium/node-firefox:4.15.0
+    container_name: projetia-selenium-firefox
+    restart: unless-stopped
+    shm_size: 2gb
+    environment:
+      SE_EVENT_BUS_HOST: selenium-hub
+      SE_EVENT_BUS_PUBLISH_PORT: 4442
+      SE_EVENT_BUS_SUBSCRIBE_PORT: 4443
+      SE_NODE_MAX_SESSIONS: 2
+      SE_NODE_SESSION_TIMEOUT: 300
+    depends_on:
+      selenium-hub:
+        condition: service_healthy
+    networks:
+      - projetia-network
+
+volumes:
+  mongodb_data:
+    driver: local
+
+networks:
+  projetia-network:
+    driver: bridge

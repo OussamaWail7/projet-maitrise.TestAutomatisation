@@ -1,8 +1,11 @@
 // src/pages/Executions.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { Clock, RefreshCcw, Search, X, Copy, Play, FileDown, ExternalLink } from "lucide-react";
+import { Clock, RefreshCcw, Search, X, Copy, Play, FileDown, ExternalLink, BarChart3, Award } from "lucide-react";
 import { apiJson, getApiBase } from "../lib/api";
+import { SkeletonTable } from "../components/Skeleton";
+import EmptyState from "../components/EmptyState";
+import CodeViewer from "../components/CodeViewer";
 
 const STATUS_COLORS = {
   queued: "bg-gray-100 text-gray-800 dark:bg-gray-900/40 dark:text-gray-200",
@@ -15,6 +18,50 @@ function StatusBadge({ status }) {
   const s = String(status || "").toLowerCase();
   const cls = STATUS_COLORS[s] || "bg-gray-100 text-gray-800 dark:bg-gray-900/40 dark:text-gray-200";
   return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>{s || "—"}</span>;
+}
+
+/** Composant barre de progression pour couverture */
+function CoverageBar({ label, percentage, total, covered }) {
+  const pct = Math.min(100, Math.max(0, percentage || 0));
+  let barColor = "bg-red-500";
+  if (pct >= 80) barColor = "bg-emerald-500";
+  else if (pct >= 60) barColor = "bg-yellow-500";
+  else if (pct >= 40) barColor = "bg-orange-500";
+
+  return (
+    <div className="mb-2">
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className="font-medium">{label}</span>
+        <span className="text-gray-600 dark:text-gray-400">
+          {pct.toFixed(1)}% <span className="opacity-60">({covered}/{total})</span>
+        </span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+        <div
+          className={`h-full transition-all duration-500 ${barColor}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Badge de note qualité */
+function QualityGrade({ grade }) {
+  const gradeColors = {
+    "A+": "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200",
+    "A": "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200",
+    "B": "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200",
+    "C": "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200",
+    "D": "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200",
+    "F": "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200",
+  };
+  const cls = gradeColors[grade] || gradeColors["F"];
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-lg font-bold ${cls}`}>
+      <Award size={18} /> {grade}
+    </span>
+  );
 }
 
 /** Helpers robustes */
@@ -51,6 +98,7 @@ export default function Executions() {
 
   const [polling, setPolling] = useState(true);
   const timerRef = useRef(null);
+  const errorCountRef = useRef(0); // ✅ Compteur d'erreurs consécutives
 
   const apiBase = getApiBase();
 
@@ -76,12 +124,17 @@ export default function Executions() {
     try {
       const data = await apiJson(`/executions/${id}`);
       setSelected(data || null);
+      errorCountRef.current = 0; // ✅ Réinitialiser le compteur d'erreurs en cas de succès
       if (data && (data.status === "success" || data.status === "failed")) {
         setPolling(false);
       }
     } catch (e) {
-      // si l’exécution n’existe plus (404), on stoppe le polling pour éviter une boucle d’erreurs
-      setPolling(false);
+      errorCountRef.current += 1; // ✅ Incrémenter le compteur d'erreurs
+      // ✅ Arrêter le polling après 5 erreurs consécutives pour éviter une boucle infinie
+      if (errorCountRef.current >= 5) {
+        console.error(`Arrêt du polling après ${errorCountRef.current} erreurs consécutives`);
+        setPolling(false);
+      }
     }
   };
 
@@ -256,9 +309,21 @@ export default function Executions() {
       {/* Liste */}
       <div className="rounded-2xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-gray-900">
         {loading ? (
-          <p className="text-sm opacity-70">Chargement…</p>
+          <SkeletonTable rows={5} cols={7} />
         ) : items.length === 0 ? (
-          <p className="text-sm opacity-70">Aucune exécution.</p>
+          <EmptyState
+            icon="search"
+            title="Aucune exécution trouvée"
+            description="Essayez de modifier vos filtres ou lancez une nouvelle exécution depuis la page Générateur."
+            action={
+              <Link
+                to="/generator"
+                className="rounded-xl bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800"
+              >
+                Créer une exécution
+              </Link>
+            }
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1000px] table-fixed text-sm">
@@ -372,62 +437,131 @@ export default function Executions() {
               </div>
             </div>
 
-            <div className="mt-2 grid gap-4 md:grid-cols-2">
-              {/* À gauche : métadonnées + actions */}
-              <section className="rounded-xl border border-black/10 p-3 dark:border-white/10">
-                <h3 className="mb-2 text-sm font-medium">Informations</h3>
-                <dl className="text-xs leading-relaxed">
-                  <div className="mb-1 flex gap-2"><dt className="w-28 text-gray-500">Exec ID</dt><dd><code className="rounded bg-black/5 px-2 py-0.5">{getExecId(selected)}</code></dd></div>
-                  <div className="mb-1 flex gap-2"><dt className="w-28 text-gray-500">Test ID</dt><dd>{getTestId(selected) ? <code className="rounded bg-black/5 px-2 py-0.5">{getTestId(selected)}</code> : "—"}</dd></div>
-                  <div className="mb-1 flex gap-2"><dt className="w-28 text-gray-500">Début</dt><dd>{selected.started_at ? new Date(selected.started_at).toLocaleString() : "—"}</dd></div>
-                  <div className="mb-1 flex gap-2"><dt className="w-28 text-gray-500">Fin</dt><dd>{selected.finished_at ? new Date(selected.finished_at).toLocaleString() : "—"}</dd></div>
-                  <div className="mb-1 flex gap-2"><dt className="w-28 text-gray-500">Notes</dt><dd>{selected.notes || "—"}</dd></div>
-                </dl>
+            <div className="mt-2 space-y-4">
+              {/* Grille supérieure : Informations, Métriques, Analyse */}
+              <div className="grid gap-4 md:grid-cols-3">
+                {/* Informations */}
+                <section className="rounded-xl border border-black/10 p-3 dark:border-white/10">
+                  <h3 className="mb-2 text-sm font-medium">Informations</h3>
+                  <dl className="text-xs leading-relaxed">
+                    <div className="mb-1 flex gap-2"><dt className="w-20 text-gray-500">Exec ID</dt><dd><code className="rounded bg-black/5 px-2 py-0.5 text-[10px]">{getExecId(selected)}</code></dd></div>
+                    <div className="mb-1 flex gap-2"><dt className="w-20 text-gray-500">Test ID</dt><dd>{getTestId(selected) ? <code className="rounded bg-black/5 px-2 py-0.5 text-[10px]">{getTestId(selected)}</code> : "—"}</dd></div>
+                    <div className="mb-1 flex gap-2"><dt className="w-20 text-gray-500">Début</dt><dd>{selected.started_at ? new Date(selected.started_at).toLocaleString() : "—"}</dd></div>
+                    <div className="mb-1 flex gap-2"><dt className="w-20 text-gray-500">Fin</dt><dd>{selected.finished_at ? new Date(selected.finished_at).toLocaleString() : "—"}</dd></div>
+                    <div className="mb-1 flex gap-2"><dt className="w-20 text-gray-500">Notes</dt><dd>{selected.notes || "—"}</dd></div>
+                  </dl>
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {getTestId(selected) ? (
-                    <button
-                      onClick={() => rerunByTest(selected)}
-                      className="inline-flex items-center gap-1 rounded-lg bg-indigo-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-800"
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {getTestId(selected) ? (
+                      <button
+                        onClick={() => rerunByTest(selected)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-800"
+                      >
+                        <Play size={14} /> Re-run
+                      </button>
+                    ) : null}
+                    <Link
+                      to={`/history`}
+                      className="inline-flex items-center gap-1 rounded-lg border border-black/10 px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
-                      <Play size={14} /> Re-run
-                    </button>
-                  ) : null}
-                  <Link
-                    to={`/history`}
-                    className="inline-flex items-center gap-1 rounded-lg border border-black/10 px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-                  >
-                    <ExternalLink size={14} /> Ouvrir l’historique
-                  </Link>
-                </div>
-
-                {selected.artifacts?.length ? (
-                  <div className="mt-4">
-                    <h4 className="mb-1 text-xs font-medium">Artefacts</h4>
-                    <ul className="space-y-1">
-                      {selected.artifacts.map((a, idx) => (
-                        <li key={idx} className="flex items-center justify-between rounded border border-black/10 px-2 py-1 text-xs dark:border-white/10">
-                          <span className="truncate">{a.name || `artifact-${idx}`}</span>
-                          {a.url ? (
-                            <a
-                              href={absUrl(a.url, apiBase)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 rounded border border-black/10 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800"
-                            >
-                              <FileDown size={14} /> Télécharger
-                            </a>
-                          ) : (
-                            <span className="opacity-60">—</span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
+                      <ExternalLink size={14} /> Historique
+                    </Link>
                   </div>
-                ) : null}
-              </section>
 
-              {/* À droite : logs */}
+                  {selected.artifacts?.length ? (
+                    <div className="mt-4">
+                      <h4 className="mb-1 text-xs font-medium">Artefacts</h4>
+                      <ul className="space-y-1">
+                        {selected.artifacts.map((a, idx) => (
+                          <li key={idx} className="flex items-center justify-between rounded border border-black/10 px-2 py-1 text-xs dark:border-white/10">
+                            <span className="truncate text-[10px]">{a.name || `artifact-${idx}`}</span>
+                            {a.url ? (
+                              <a
+                                href={absUrl(a.url, apiBase)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 rounded border border-black/10 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800"
+                              >
+                                <FileDown size={12} />
+                              </a>
+                            ) : (
+                              <span className="opacity-60">—</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </section>
+
+                {/* Métriques JaCoCo */}
+                {selected.jacoco_metrics ? (
+                  <section className="rounded-xl border border-black/10 p-3 dark:border-white/10">
+                    <h3 className="mb-2 flex items-center gap-1 text-sm font-medium">
+                      <BarChart3 size={16} /> Couverture de Code
+                    </h3>
+                    <CoverageBar
+                      label="Lignes"
+                      percentage={selected.jacoco_metrics.line_coverage}
+                      total={selected.jacoco_metrics.lines_total}
+                      covered={selected.jacoco_metrics.lines_covered}
+                    />
+                    <CoverageBar
+                      label="Branches"
+                      percentage={selected.jacoco_metrics.branch_coverage}
+                      total={selected.jacoco_metrics.branches_total}
+                      covered={selected.jacoco_metrics.branches_covered}
+                    />
+                    <CoverageBar
+                      label="Instructions"
+                      percentage={selected.jacoco_metrics.instruction_coverage}
+                      total={selected.jacoco_metrics.instructions_total}
+                      covered={selected.jacoco_metrics.instructions_covered}
+                    />
+                  </section>
+                ) : null}
+
+                {/* Analyse de Qualité */}
+                {selected.quality_analysis ? (
+                  <section className="rounded-xl border border-black/10 p-3 dark:border-white/10">
+                    <h3 className="mb-2 flex items-center gap-1 text-sm font-medium">
+                      <Award size={16} /> Analyse de Qualité
+                    </h3>
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className="text-xs text-gray-600 dark:text-gray-400">Note globale</span>
+                      <QualityGrade grade={selected.quality_analysis.grade} />
+                    </div>
+                    <div className="mb-3 space-y-1 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Score global</span>
+                        <span className="font-semibold">{selected.quality_analysis.overall_score}/100</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Qualité du test</span>
+                        <span className="font-semibold">{selected.quality_analysis.test_quality_score}/100</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Couverture</span>
+                        <span className="font-semibold">{selected.quality_analysis.coverage_score}/100</span>
+                      </div>
+                    </div>
+                    {selected.quality_analysis.recommendations?.length ? (
+                      <div>
+                        <h4 className="mb-1 text-xs font-medium">Recommandations</h4>
+                        <ul className="max-h-32 space-y-1 overflow-auto text-[10px] leading-relaxed">
+                          {selected.quality_analysis.recommendations.map((rec, idx) => (
+                            <li key={idx} className="rounded bg-black/5 px-2 py-1 dark:bg-white/5">
+                              {rec}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+              </div>
+
+              {/* Logs en pleine largeur en dessous */}
               <section className="rounded-xl border border-black/10 p-3 dark:border-white/10">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-medium">Logs</h3>
@@ -452,11 +586,13 @@ export default function Executions() {
                     ) : null}
                   </div>
                 </div>
-                <div className="max-h-[60vh] overflow-auto rounded-lg bg-black/5 p-3 dark:bg-white/5">
-                  <pre className="whitespace-pre-wrap text-xs leading-relaxed">
-                    {selected.logs || "(aucun log pour le moment)"}
-                  </pre>
-                </div>
+                <CodeViewer
+                  code={selected.logs || "(aucun log pour le moment)"}
+                  language="text"
+                  showLineNumbers={false}
+                  maxHeight="60vh"
+                  fileName="execution.log"
+                />
               </section>
             </div>
           </div>

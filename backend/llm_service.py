@@ -7,8 +7,8 @@ from typing import Optional, List, Dict
 # 0) Modèle & endpoint Ollama
 # -----------------------------
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
-# IMPORTANT: utiliser un modèle INSTRUCT
-DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-coder:6.7b-instruct")
+# ✅ IMPORTANT: utiliser un modèle INSTRUCT - Cohérence avec settings.py
+DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-coder:6.7b")
 
 # ============================
 # 1) Détection & parsing Spring
@@ -264,16 +264,31 @@ def _fallback_spring_mockmvc_from_spec(spec: List[Dict], controller_class: str =
 # ============================
 
 def _ollama_call(payload: dict, timeout: int = 90) -> str:
-    r = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
-    if r.status_code != 200:
-        try:
-            detail = r.json()
-        except Exception:
-            detail = r.text
-        if "model not found" in str(detail).lower():
-            raise Exception(f"Model {payload.get('model')} not found. Faites: ollama pull {payload.get('model')}")
-        raise Exception(f"Ollama error {r.status_code}: {detail}")
-    return (r.json().get("response") or "").strip()
+    """
+    ✅ Appel Ollama avec gestion d'erreur améliorée
+    """
+    try:
+        r = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
+        if r.status_code != 200:
+            try:
+                detail = r.json()
+            except Exception:
+                detail = r.text
+            if "model not found" in str(detail).lower():
+                raise Exception(f"Model {payload.get('model')} not found. Faites: ollama pull {payload.get('model')}")
+            raise Exception(f"Ollama error {r.status_code}: {detail}")
+        return (r.json().get("response") or "").strip()
+    except requests.exceptions.Timeout:
+        raise Exception(
+            f"Timeout Ollama après {timeout}s. "
+            f"Le modèle {payload.get('model')} est peut-être trop gros. "
+            "Essayez un modèle plus petit ou augmentez GEN_TIMEOUT dans .env"
+        )
+    except requests.exceptions.ConnectionError:
+        raise Exception(
+            f"Impossible de se connecter à Ollama ({OLLAMA_URL}). "
+            "Vérifiez qu'Ollama est démarré avec 'ollama serve'"
+        )
 
 def _is_stub_or_too_short(text: str) -> bool:
     t = (text or "").strip()
@@ -363,3 +378,25 @@ def generate_test_case_ollama(
         )
     # Dernier recours
     return "// Test non vide: veuillez fournir plus de contexte (classe/méthodes à tester) pour un test complet."
+
+def list_available_models() -> list:
+    """Liste les modèles Ollama disponibles"""
+    try:
+        # Endpoint pour lister les modèles Ollama
+        base_url = OLLAMA_URL.replace("/api/generate", "")
+        r = requests.get(f"{base_url}/api/tags", timeout=3)
+        if r.status_code == 200:
+            data = r.json()
+            return [
+                {
+                    "id": model["name"],
+                    "name": model["name"],
+                    "description": f"Size: {model.get('size', 0) / 1024 / 1024 / 1024:.1f}GB",
+                    "provider": "ollama"
+                }
+                for model in data.get("models", [])
+            ]
+        return []
+    except Exception as e:
+        print(f"Erreur lors de la récupération des modèles Ollama: {e}")
+        return []
